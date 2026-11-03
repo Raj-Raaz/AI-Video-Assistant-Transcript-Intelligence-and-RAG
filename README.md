@@ -1,4 +1,4 @@
-# AI Video Assistant
+# AI Video Assistant– Transcript Intelligence and RAG
 
 A Streamlit app that turns YouTube videos and uploaded audio or video files into summaries, structured notes, and a searchable transcript. Ask questions about a video and get answers based on its transcript.
 
