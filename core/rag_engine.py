@@ -1,37 +1,32 @@
-import os
+import hashlib
 from dotenv import load_dotenv
 
-from langchain_mistralai import ChatMistralAI
+from core.llm_utils import get_llm, invoke_with_retry
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 
-from core.vector_store import get_vector_store
+from core.vector_store import get_vector_store, index_transcript, video_filter
 
 load_dotenv()
 
 
-def get_llm():
-    return ChatMistralAI(
-        model_name="mistral-small-latest",
-        api_key=os.getenv("MISTRAL_API_KEY"),
-        temperature=0.3,
-    )
-
-
 def format_docs(docs):
-    return "\n\n".join(
-        [doc.page_content for doc in docs]
-    )
+    return "\n\n".join(doc.page_content for doc in docs)
 
 
 def build_rag_chain(transcript: str):
 
+    if not transcript.strip():
+        raise ValueError("Transcript cannot be empty")
+    video_id = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
     vector_store = get_vector_store()
+    count = index_transcript(transcript, video_id, vector_store=vector_store)
+    print(f"Indexed {count} transcript chunks for video chat.")
 
     retriever = vector_store.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 5},
+        search_kwargs={"k": 5, "filter": video_filter(video_id)},
     )
 
     llm = get_llm()
@@ -55,15 +50,15 @@ Context from video transcripts:
         ("human", "{question}"),
     ])
 
-    rag_chain = (
+    return (
         {
             "context": retriever | RunnableLambda(format_docs),
             "question": RunnablePassthrough(),
         }
-        | prompt  | llm | StrOutputParser()
+        | prompt
+        | llm
+        | StrOutputParser()
     )
-
-    return rag_chain
 
 
 def ask_question(rag_chain, question: str) -> str:
@@ -71,10 +66,4 @@ def ask_question(rag_chain, question: str) -> str:
     if not question.strip():
         raise ValueError("Question cannot be empty")
 
-    print(f"Question: {question}")
-
-    answer = rag_chain.invoke(question)
-
-    print(f"Answer: {answer}")
-
-    return answer
+    return invoke_with_retry(rag_chain, question)

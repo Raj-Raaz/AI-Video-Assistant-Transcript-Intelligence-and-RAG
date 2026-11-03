@@ -1,55 +1,53 @@
-
 from dotenv import load_dotenv
+
+load_dotenv()
+
+from core.llm_utils import RateLimitError
 
 from utils.audio_processor import process_input_audio
 from core.transcriber import transcribe_audio_chunks
 from core.summarize import summarize_text, generate_title
-from core.extractor import (
-    extract_action_items,
-    extract_key_decisions,
-    extract_questions,
-)
+from core.extractor import extract_information
 from core.rag_engine import build_rag_chain, ask_question
 
 
-load_dotenv()
-
-
-def run_pipeline(source: str, language: str = "en") -> dict:
+def run_pipeline(source: str, language: str = "en", output_dir=None, on_progress=None) -> dict:
 
     print("Starting AI Video Assistant")
 
-    # Step 1: Process audio
-    chunks = process_input_audio(source)
+    report = on_progress or print
+    report("Preparing audio...")
+    chunks = (process_input_audio(source, output_dir=output_dir)
+              if output_dir else process_input_audio(source))
     print(f"Processed audio into {len(chunks)} chunks.")
 
-    # Step 2: Transcribe audio ONCE
-    transcript = transcribe_audio_chunks(
-        chunks,
-        language=language
-    )
+    report("Transcribing audio...")
+    transcript = transcribe_audio_chunks(chunks, language=language)
+    if not transcript.strip():
+        raise ValueError("Transcription returned no text")
 
-    print(f"Transcript: {transcript[:300]}")
+    print(f"Transcript: {transcript}")
 
-    # Step 3: Generate title and summary
+    # Generate title and summary
+    report("Generating title and summary...")
     title = generate_title(transcript)
     summary = summarize_text(transcript)
 
-    # Step 4: Extract information
-    action_items = extract_action_items(transcript)
-    key_decisions = extract_key_decisions(transcript)
-    questions = extract_questions(transcript)
+    # Extract information
+    report("Extracting action items, decisions, and questions...")
+    information = extract_information(transcript)
 
-    # Step 5: Build RAG chain
+    # Prepare video chat
+    report("Preparing video chat...")
     rag_chain = build_rag_chain(transcript)
 
     return {
         "title": title,
         "transcript": transcript,
         "summary": summary,
-        "action_items": action_items,
-        "key_decisions": key_decisions,
-        "questions": questions,
+        "action_items": information["action_items"],
+        "key_decisions": information["key_decisions"],
+        "questions": information["questions"],
         "rag_chain": rag_chain,
     }
 
@@ -60,7 +58,11 @@ if __name__ == "__main__":
 
     language = input("Language (en/hi/hinglish): ").strip() or "en"
 
-    result = run_pipeline(source, language)
+    try:
+        result = run_pipeline(source, language)
+    except RateLimitError as exc:
+        print(f"\n{exc}")
+        raise SystemExit(1) from None
 
     print("\n" + "=" * 60)
     print(f"Title: {result['title']}")
@@ -86,6 +88,10 @@ if __name__ == "__main__":
         if not question:
             continue
 
-        answer = ask_question(rag_chain, question)
+        try:
+            answer = ask_question(rag_chain, question)
+        except RateLimitError as exc:
+            print(f"\n{exc}\n")
+            continue
 
         print(f"\nAssistant: {answer}\n")

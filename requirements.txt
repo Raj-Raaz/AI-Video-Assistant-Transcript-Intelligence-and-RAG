@@ -11,4 +11,8 @@ torch
 transformers
 cohere
 langchain-cohere
-langchain-mistralai
+httpx
+openai-whisper
+yt-dlp[default]
+pydub
+requests

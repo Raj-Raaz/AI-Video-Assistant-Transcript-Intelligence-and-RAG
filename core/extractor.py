@@ -1,57 +1,36 @@
+import json
 
-import os
-
-from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers.string import StrOutputParser
-from langchain_core.runnables import RunnableLambda
+
+from core.llm_utils import get_llm
 
 
+def extract_information(text: str) -> dict[str, str]:
+    prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "Extract information explicitly stated in the transcript. "
+         "Return a JSON object with exactly three keys: action_items, key_decisions, questions. "
+         "Each value must be a string containing a numbered list. "
+         "For action_items, include only assigned tasks or explicit commitments, with owner "
+         "and deadline (use 'Not specified' when absent). Do not turn reported events into tasks. "
+         "For key_decisions, include only explicitly stated decisions. "
+         "For questions, include only unresolved questions actually raised in the transcript; "
+         "do not invent follow-up questions. "
+         "If a category is absent, use 'No action items found.', 'No key decisions found.', "
+         "or 'No open questions found.' respectively. Do not guess names, dates, or facts."),
+        ("human", "{text}"),
+    ])
+    chain = prompt | get_llm(json_mode=True)
+    response = chain.invoke({"text": text})
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError as exc:
+        raise ValueError("The model returned invalid JSON for the extracted information.") from exc
 
-def get_llm():
-    return ChatMistralAI(
-        model_name="mistral-small-latest",
-        api_key=os.environ.get("MISTRAL_API_KEY"),
-        temperature=0.2,
-        max_tokens=2048,
-    )
-
-def build_chain(system_prompt:str):
-    llm = get_llm()
-    return(
-        RunnableLambda(lambda x: {"text": x})
-        | ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", "{text}"),
-        ]) | llm | StrOutputParser()
-    )
-
-def extract_action_items(text:str)->str:
-    chain = build_chain(
-         "You are an expert meeting analyst. From the meeting transcript, "
-        "extract all action items. For each provide:\n"
-        "- Task description\n"
-        "- Owner (who is responsible)\n"
-        "- Deadline (if mentioned, else write 'Not specified')\n\n"
-        "Format as a numbered list. If none found say 'No action items found.'"
-    )
-
-    return chain.invoke(text)
-
-
-def extract_key_decisions(text: str) -> str:
-    chain = build_chain(
-        "You are an expert meeting analyst. From the meeting transcript, "
-        "extract all key decisions made. Format as a numbered list. "
-        "If none found say 'No key decisions found.'"
-    )
-    return chain.invoke(text)
-
-
-def extract_questions(text: str) -> str:
-    chain = build_chain(
-        "From the meeting transcript, extract all unresolved questions "
-        "or topics needing follow-up. Format as a numbered list. "
-        "If none found say 'No open questions found.'"
-    )
-    return chain.invoke(text)
+    fields = ("action_items", "key_decisions", "questions")
+    if not isinstance(result, dict) or any(
+        not isinstance(result.get(field), str) or not result[field].strip()
+        for field in fields
+    ):
+        raise ValueError("The model must return text for all three extraction fields.")
+    return {field: result[field] for field in fields}

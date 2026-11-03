@@ -7,7 +7,7 @@ from pydub import AudioSegment
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-def download_audio_from_youtube(url:str) -> str:
+def download_audio_from_youtube(url: str, output_dir: str = DOWNLOAD_DIR) -> str:
     node_path = shutil.which("node")
     if node_path is None:
         raise RuntimeError(
@@ -16,7 +16,7 @@ def download_audio_from_youtube(url:str) -> str:
             "on PATH."
         )
 
-    output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+    output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_path,
@@ -52,10 +52,10 @@ def chunk_audio(input_file:str, chunk_minutes:int=10) -> list:
         chunks.append(chunk_file)
     return chunks
 
-def process_input_audio(input_file:str) -> list:
+def process_input_audio(input_file: str, output_dir: str = DOWNLOAD_DIR) -> list:
     if input_file.startswith(("http://", "https://")):
         print(f"Downloading audio from YouTube URL: {input_file}")
-        input_file = download_audio_from_youtube(input_file)
+        input_file = download_audio_from_youtube(input_file, output_dir=output_dir)
     else:
         print(f"Processing local audio file: {input_file}")
 

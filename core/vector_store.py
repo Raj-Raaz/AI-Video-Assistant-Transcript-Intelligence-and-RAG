@@ -1,5 +1,6 @@
 
 import os
+from uuid import NAMESPACE_URL, uuid5
 from typing import Any
 
 from dotenv import load_dotenv
@@ -7,7 +8,7 @@ from langchain_cohere import CohereEmbeddings
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 load_dotenv()
 
@@ -32,14 +33,26 @@ def get_embeddings() -> CohereEmbeddings:
 
 
 def get_qdrant_client() -> QdrantClient:
-    return QdrantClient(url="http://localhost:6333")
+    return QdrantClient(
+        url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+        api_key=os.getenv("QDRANT_API_KEY") or None,
+    )
 
 
 def get_vector_store() -> QdrantVectorStore:
+    client = get_qdrant_client()
+    embeddings = get_embeddings()
+    if not client.collection_exists(COLLECTION_NAME):
+        # Derive the vector size from the configured embedding model.
+        dimension = len(embeddings.embed_query("embedding dimension"))
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE),
+        )
     return QdrantVectorStore(
-        client=get_qdrant_client(),
+        client=client,
         collection_name=COLLECTION_NAME,
-        embedding=get_embeddings(),
+        embedding=embeddings,
     )
 
 
@@ -47,6 +60,7 @@ def index_transcript(
     transcript: str,
     video_id: str,
     metadata: dict[str, Any] | None = None,
+    vector_store: QdrantVectorStore | None = None,
 ) -> int:
 
     if not transcript.strip():
@@ -67,12 +81,11 @@ def index_transcript(
         doc.metadata["video_id"] = video_id
         doc.metadata["chunk_index"] = i
 
-    vector_store = QdrantVectorStore.from_documents(
-        documents=documents,
-        embedding=get_embeddings(),
-        collection_name=COLLECTION_NAME,
-        client=get_qdrant_client(),
-    )
+    if vector_store is None:
+        vector_store = get_vector_store()
+    # Upsert the same IDs on repeat runs instead of creating duplicate chunks.
+    ids = [str(uuid5(NAMESPACE_URL, f"{video_id}:{i}")) for i in range(len(documents))]
+    vector_store.add_documents(documents, ids=ids)
 
     return len(documents)
 
@@ -95,14 +108,13 @@ def search_transcript(
         return vector_store.similarity_search(
             query=query,
             k=k,
-            filter={
-                "must": [
-                    {
-                        "key": "metadata.video_id",
-                        "match": {"value": video_id},
-                    }
-                ]
-            },
+            filter=video_filter(video_id),
         )
 
     return vector_store.similarity_search(query, k=k)
+
+
+def video_filter(video_id: str) -> models.Filter:
+    return models.Filter(must=[models.FieldCondition(
+        key="metadata.video_id", match=models.MatchValue(value=video_id),
+    )])
