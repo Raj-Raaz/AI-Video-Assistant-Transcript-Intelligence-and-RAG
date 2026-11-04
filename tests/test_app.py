@@ -40,11 +40,14 @@ class StreamlitTests(unittest.TestCase):
         self.assertFalse(self.app.exception)
         self.assertEqual(self.app.text_area[0].value, 'Full transcript')
         self.app.run()
-        with patch('core.rag_engine.ask_question', return_value='An answer') as ask:
+        answer = 'An answer\n\n**Retrieved sources**\n- [00:05–00:10](https://www.youtube.com/watch?v=yB9SC4HbH5o&t=5s)'
+        with patch('core.rag_engine.ask_question', return_value=answer) as ask:
             self.app.chat_input[0].set_value('What happened?').run()
             ask.assert_called_once_with('test-chain', 'What happened?')
         self.pipeline.assert_called_once()
         self.assertEqual(len(self.app.session_state['messages']), 2)
+        self.app.run()
+        self.assertTrue(any('watch?v=yB9SC4HbH5o&t=5s' in element.value for element in self.app.markdown))
         self.app.button[1].click().run()
         self.assertNotIn('result', self.app.session_state)
         self.assertFalse(self.app.exception)

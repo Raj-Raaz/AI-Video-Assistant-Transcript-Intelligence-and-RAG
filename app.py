@@ -113,6 +113,7 @@ with transcript_tab:
 st.divider()
 st.subheader("Chat with your video")
 st.caption("Ask a specific question about this video. Each question is answered using its transcript.")
+st.caption("Retrieved sources show approximate time ranges used for the answer. YouTube links open at the start; uploaded files show times only. Hinglish ranges cover up to 25 seconds per speech segment.")
 for message in st.session_state.get("messages", []):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])

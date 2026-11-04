@@ -22,7 +22,8 @@ def run_pipeline(source: str, language: str = "en", output_dir=None, on_progress
     print(f"Processed audio into {len(chunks)} chunks.")
 
     report("Transcribing audio...")
-    transcript = transcribe_audio_chunks(chunks, language=language)
+    transcription = transcribe_audio_chunks(chunks, language=language, with_segments=True)
+    transcript = transcription["text"]
     if not transcript.strip():
         raise ValueError("Transcription returned no text")
 
@@ -39,7 +40,7 @@ def run_pipeline(source: str, language: str = "en", output_dir=None, on_progress
 
     # Prepare video chat
     report("Preparing video chat...")
-    rag_chain = build_rag_chain(transcript)
+    rag_chain = build_rag_chain(transcript, segments=transcription["segments"], source=source)
 
     return {
         "title": title,

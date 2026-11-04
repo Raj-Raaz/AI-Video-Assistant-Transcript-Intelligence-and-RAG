@@ -12,7 +12,7 @@ class PipelineTests(unittest.TestCase):
         function = next(n for n in ast.parse(source).body
                         if isinstance(n, ast.FunctionDef) and n.name == 'run_pipeline')
         process = Mock(return_value=['audio'])
-        transcribe = Mock(return_value='transcript')
+        transcribe = Mock(return_value={"text": "transcript", "segments": []})
         scope = dict(process_input_audio=process, transcribe_audio_chunks=transcribe,
                      generate_title=Mock(side_effect=RateLimitError('limited')))
         exec(compile(ast.Module(body=[function], type_ignores=[]), 'main.py', 'exec'), scope)
@@ -29,12 +29,13 @@ class PipelineTests(unittest.TestCase):
         information = {"action_items": "tasks", "key_decisions": "decisions", "questions": "questions"}
         extract = Mock(return_value=information)
         scope = dict(process_input_audio=Mock(return_value=['audio']),
-                     transcribe_audio_chunks=Mock(return_value='transcript'),
+                     transcribe_audio_chunks=Mock(return_value={"text": "transcript", "segments": []}),
                      generate_title=Mock(return_value='title'),
                      summarize_text=Mock(return_value='summary'),
                      extract_information=extract, build_rag_chain=Mock(return_value='chat'))
         exec(compile(ast.Module(body=[function], type_ignores=[]), 'main.py', 'exec'), scope)
         result = scope['run_pipeline']('video', 'en')
         extract.assert_called_once_with('transcript')
+        scope['build_rag_chain'].assert_called_once_with('transcript', segments=[], source='video')
         for field, value in information.items():
             self.assertEqual(result[field], value)

@@ -61,6 +61,7 @@ def index_transcript(
     video_id: str,
     metadata: dict[str, Any] | None = None,
     vector_store: QdrantVectorStore | None = None,
+    segments: list[dict] | None = None,
 ) -> int:
 
     if not transcript.strip():
@@ -69,6 +70,7 @@ def index_transcript(
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
+        add_start_index=True,
     )
 
     documents = splitter.create_documents(
@@ -76,10 +78,27 @@ def index_transcript(
         metadatas=[metadata or {}],
     )
 
+    # Map character ranges back to the speech segments they overlap.
+    ranges = []
+    cursor = 0
+    for segment in segments or []:
+        start = transcript.find(segment["text"], cursor)
+        if start < 0:
+            raise ValueError("Timed segment text does not match the transcript")
+        end = start + len(segment["text"])
+        ranges.append((start, end, segment))
+        cursor = end
+
     # Add video information to every chunk
     for i, doc in enumerate(documents):
         doc.metadata["video_id"] = video_id
         doc.metadata["chunk_index"] = i
+        start = doc.metadata["start_index"]
+        end = start + len(doc.page_content)
+        matches = [s for left, right, s in ranges if left < end and right > start]
+        if matches:
+            doc.metadata["start_seconds"] = matches[0]["start"]
+            doc.metadata["end_seconds"] = matches[-1]["end"]
 
     if vector_store is None:
         vector_store = get_vector_store()

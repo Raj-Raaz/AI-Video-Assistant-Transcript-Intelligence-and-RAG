@@ -28,7 +28,7 @@ def load_model():
     return _model
 
 
-def transcribe_audio_whisper(audio_file: str) -> str:
+def transcribe_audio_whisper(audio_file: str, with_segments=False):
     model = load_model()
 
     result = model.transcribe(
@@ -36,6 +36,11 @@ def transcribe_audio_whisper(audio_file: str) -> str:
         task="transcribe"
     )
 
+    if with_segments:
+        return {"text": result["text"], "segments": [
+            {"text": s["text"].strip(), "start": float(s["start"]), "end": float(s["end"])}
+            for s in result.get("segments", []) if s["text"].strip()
+        ]}
     return result["text"]
 
 
@@ -81,7 +86,7 @@ def send_to_sarvam(audio_file: str) -> str:
     return response.json().get("transcript", "")
 
 
-def transcribe_audio_sarvam(audio_file: str) -> str:
+def transcribe_audio_sarvam(audio_file: str, with_segments=False):
 
     if not SARVAM_API_KEY:
         raise RuntimeError(
@@ -93,6 +98,7 @@ def transcribe_audio_sarvam(audio_file: str) -> str:
     piece_ms = SARVAM_PIECE_SECONDS * 1000
 
     full_transcription = ""
+    segments = []
 
     total_pieces = (
         len(audio) + piece_ms - 1
@@ -113,18 +119,23 @@ def transcribe_audio_sarvam(audio_file: str) -> str:
 
         try:
             print(
-                f"  → Sarvam piece "
+                f"  Sarvam piece "
                 f"{i + 1}/{total_pieces}..."
             )
 
             text = send_to_sarvam(piece_path)
 
             full_transcription += text + " "
+            if text.strip():
+                segments.append({"text": text.strip(), "start": start / 1000,
+                                 "end": min(start + piece_ms, len(audio)) / 1000})
 
         finally:
             if os.path.exists(piece_path):
                 os.remove(piece_path)
 
+    if with_segments:
+        return {"text": full_transcription.strip(), "segments": segments}
     return full_transcription.strip()
 
 
@@ -141,10 +152,13 @@ def transcribe_audio(
 
 def transcribe_audio_chunks(
     audio_chunks: list,
-    language: str = "english"
-) -> str:
+    language: str = "english",
+    with_segments=False,
+):
 
     full_transcription = ""
+    segments = []
+    offset = 0.0
 
     if language.lower() == "hinglish":
         print("Using Sarvam AI for transcription.")
@@ -158,13 +172,22 @@ def transcribe_audio_chunks(
             f"{i + 1}/{len(audio_chunks)}..."
         )
 
-        text = transcribe_audio(
-            chunk,
-            language=language
-        )
+        if with_segments:
+            transcribe = transcribe_audio_sarvam if language.lower() == "hinglish" else transcribe_audio_whisper
+            result = transcribe(chunk, with_segments=True)
+            text = " ".join(s["text"] for s in result["segments"]) or result["text"]
+            segments.extend({**s, "start": s["start"] + offset, "end": s["end"] + offset}
+                            for s in result["segments"])
+            offset += len(AudioSegment.from_file(chunk)) / 1000
+        else:
+            text = transcribe_audio(chunk, language=language)
 
         full_transcription += text + " "
 
     print("Transcription complete.")
 
+    if with_segments:
+        # Use the same segment text for display and retrieval offset mapping.
+        return {"text": full_transcription.strip(),
+                "segments": segments}
     return full_transcription.strip()
